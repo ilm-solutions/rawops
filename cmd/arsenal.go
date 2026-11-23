@@ -2,7 +2,6 @@ package cmd
 
 import (
 "fmt"
-"os"
 "os/exec"
 "strings"
 
@@ -108,7 +107,7 @@ fmt.Printf("%s%-14s%s %-5s %-24s %s\n", Bold, t.ID, Reset, t.Category, t.Package
 var arsenalBundleCmd = &cobra.Command{
 Use: "bundle [preset]", Short: "Deploy hosting stack (game-host|vps-node|sec-core|net-edge|storage-pro)", Args: cobra.ExactArgs(1),
 Run: func(cmd *cobra.Command, args []string) {
-preset := strings.ToLower(args)
+preset := strings.ToLower(args[0])
 PrintBanner()
 mods, ok := BundlePresets[preset]
 if !ok {
