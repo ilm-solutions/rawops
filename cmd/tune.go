@@ -3,6 +3,7 @@ package cmd
 import (
 "fmt"
 "os"
+"os/exec"
 "strings"
 
 "github.com/spf13/cobra"
@@ -30,35 +31,45 @@ fmt.Printf("[%sSYS%s] TCP Congestion Control   : %s\n", Cyan, Reset, readKernelP
 fmt.Printf("[%sSYS%s] CPU0 Frequency Governor  : %s\n\n", Cyan, Reset, readKernelParam("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"))
 
 if profile == "" {
-fmt.Printf("[%sINF%s] Specify --profile=game|vps to generate custom raw tuning.\n", Yellow, Reset)
+fmt.Printf("[%sINF%s] Specify --profile=game|vps to generate or apply tuning.\n", Yellow, Reset)
 return
 }
 
-RunTask("Generating raw sysctl profile ["+strings.ToUpper(profile)+"]...", 800)
-configContent := fmt.Sprintf("# RAWOPS KERNEL TUNING PROFILE: %s\n", strings.ToUpper(profile))
+RunTask("Compiling raw sysctl profile ["+strings.ToUpper(profile)+"]...", 700)
+cfg := fmt.Sprintf("# RAWOPS ENTERPRISE KERNEL PROFILE: %s\n", strings.ToUpper(profile))
 if profile == "game" {
-configContent += "vm.swappiness = 1\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\nnet.core.rmem_max = 16777216\nnet.core.wmem_max = 16777216\n"
+cfg += "vm.swappiness = 1\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\nnet.core.rmem_max = 16777216\nnet.core.wmem_max = 16777216\nnet.core.netdev_max_backlog = 16384\n"
 } else {
-configContent += "vm.swappiness = 10\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\nfs.file-max = 2097152\n"
+cfg += "vm.swappiness = 10\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\nfs.file-max = 2097152\nvm.dirty_ratio = 15\n"
 }
 
+if !apply {
 outFile := "rawops-tune-" + profile + ".conf"
-_ = os.WriteFile(outFile, []byte(configContent), 0644)
-fmt.Printf("[%sOK%s] Raw tuning blueprint written to: %s\n", Green+Bold, Reset, outFile)
+_ = os.WriteFile(outFile, []byte(cfg), 0644)
+fmt.Printf("[%sDRY-RUN%s] Blueprint saved: %s (Use --apply as root for live injection)\n", Yellow+Bold, Reset, outFile)
+return
+}
 
-if apply {
 if os.Geteuid() != 0 {
-fmt.Printf("[%sERR%s] Root privileges (UID 0) required to inject live kernel sysctl.\n", Red+Bold, Reset)
-} else {
-RunTask("Injecting parameters into live Linux kernel...", 900)
-fmt.Printf("[%sACTIVE%s] Machine locked in BEAST PERFORMANCE mode.\n", Green+Bold, Reset)
+fmt.Printf("[%sERR%s] Root privileges (UID 0) required for live kernel injection.\n", Red+Bold, Reset)
+return
 }
-}
+
+RunTask("Creating pre-flight host snapshot in /var/backups/rawops...", 600)
+_ = CreateHostSnapshot()
+
+targetPath := "/etc/sysctl.d/99-rawops.conf"
+_ = os.WriteFile(targetPath, []byte(cfg), 0644)
+RunTask("Executing live kernel sysctl --system reload...", 800)
+_ = exec.Command("sysctl", "--system").Run()
+_ = exec.Command("cpupower", "frequency-set", "-g", "performance").Run()
+
+fmt.Printf("\n[%sACTIVE%s] Live kernel & CPU governor locked in [%s] mode.\n", Green+Bold, Reset, strings.ToUpper(profile))
 },
 }
 
 func init() {
 tuneCmd.Flags().String("profile", "", "Performance profile (game | vps)")
-tuneCmd.Flags().Bool("apply", false, "Apply tuning directly to live kernel (requires root)")
+tuneCmd.Flags().Bool("apply", false, "Inject tuning directly into live kernel (requires root)")
 rootCmd.AddCommand(tuneCmd)
 }
