@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================================================"
-echo " RAWOPS ENGINE INSTALLER | BARE-METAL CONTROL PLANE (x86_64)"
+echo " RAWOPS v1.0.0 INSTALLER | BARE-METAL CONTROL PLANE (x86_64)"
 echo "========================================================================"
 
 ARCH=$(uname -m)
@@ -16,8 +16,15 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-echo "[*] Installing rawops-linux-amd64 to /usr/local/bin/rawops..."
-install -m 0755 rawops-linux-amd64 /usr/local/bin/rawops
-mkdir -p /etc/rawops
+if [ -f "./rawops-linux-amd64" ]; then
+    echo "[*] Installing local binary to /usr/local/bin/rawops..."
+    install -m 0755 ./rawops-linux-amd64 /usr/local/bin/rawops
+else
+    URL="https://github.com"
+    echo "[*] Downloading latest x86_64 release binary..."
+    curl -fsSL "$URL" -o /usr/local/bin/rawops
+    chmod 0755 /usr/local/bin/rawops
+fi
 
-echo "[OK] Installation complete. Execute 'rawops status' to initialize."
+mkdir -p /etc/rawops /var/backups/rawops
+echo "[OK] RawOps v1.0.0 installed. Execute 'rawops status' to verify."

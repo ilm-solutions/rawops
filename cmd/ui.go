@@ -16,7 +16,7 @@ const (
 
 func PrintBanner() {
 	fmt.Println(Cyan + Bold + "========================================================================")
-	fmt.Println(" RAWOPS ENGINE v0.1.0-x86_64 | BARE-METAL CONTROL PLANE [CLI-ONLY]")
+	fmt.Println(" RAWOPS ENGINE v1.0.0-x86_64 | BARE-METAL CONTROL PLANE [CLI-ONLY]")
 	fmt.Println("========================================================================" + Reset)
 }
 
