@@ -89,3 +89,62 @@ func TestParseShieldPorts(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderShieldPolicy(t *testing.T) {
+	ports := []string{"22", "25565"}
+
+	want := `table inet rawops_shield {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        ct state invalid drop
+        iifname "lo" accept
+        ct state established,related accept
+        tcp dport { 22, 25565 } accept
+        udp dport { 22, 25565 } accept
+    }
+}
+`
+
+	got := renderShieldPolicy(ports)
+
+	if got != want {
+		t.Fatalf("renderShieldPolicy() output mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestBuildShieldPolicy(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantPorts []string
+		wantErr   bool
+	}{
+		{name: "valid ports", input: "22,25565", wantPorts: []string{"22", "25565"}},
+		{name: "duplicate ports", input: "22,22", wantPorts: []string{"22"}},
+		{name: "empty input", input: "", wantErr: true},
+		{name: "invalid port", input: "70000", wantErr: true},
+		{name: "empty entry", input: "22,,80", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildShieldPolicy(tt.input)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("buildShieldPolicy() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if err != nil {
+				if got != "" {
+					t.Fatalf("expected empty policy on error, got %q", got)
+				}
+				return
+			}
+
+			want := renderShieldPolicy(tt.wantPorts)
+			if got != want {
+				t.Fatalf("buildShieldPolicy() output mismatch:\\ngot:\\n%s\\nwant:\\n%s", got, want)
+			}
+		})
+	}
+}

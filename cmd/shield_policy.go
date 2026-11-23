@@ -44,3 +44,31 @@ func parseShieldPorts(raw string) ([]string, error) {
 
 	return ports, nil
 }
+
+// renderShieldPolicy generates an additive RAWOPS-owned nftables policy.
+// It performs no filesystem or host-system operations.
+func renderShieldPolicy(ports []string) string {
+	joined := strings.Join(ports, ", ")
+
+	return fmt.Sprintf(`table inet rawops_shield {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        ct state invalid drop
+        iifname "lo" accept
+        ct state established,related accept
+        tcp dport { %s } accept
+        udp dport { %s } accept
+    }
+}
+`, joined, joined)
+}
+
+// buildShieldPolicy validates ports before rendering the policy.
+func buildShieldPolicy(raw string) (string, error) {
+	ports, err := parseShieldPorts(raw)
+	if err != nil {
+		return "", err
+	}
+
+	return renderShieldPolicy(ports), nil
+}
