@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseConfigDefault(t *testing.T) {
 	cfg, err := parseConfig(defaultConfig)
@@ -13,7 +16,7 @@ func TestParseConfigDefault(t *testing.T) {
 }
 
 func TestParseConfigRejectsUnknownKey(t *testing.T) {
-	bad := defaultConfig + "\n[performance]\nunsafe_magic = true\n"
+	bad := strings.Replace(defaultConfig, "[shield]", "unsafe_magic = true\n\n[shield]", 1)
 	if _, err := parseConfig(bad); err == nil {
 		t.Fatal("expected unknown key to fail")
 	}
@@ -26,5 +29,51 @@ func TestParseConfigRejectsInvalidPort(t *testing.T) {
 		"[shield]\nmode = \"strict\"\nallowed_ports = \"99999\"\nenable_syn_cookie = true\n"
 	if _, err := parseConfig(bad); err == nil {
 		t.Fatal("expected invalid port to fail")
+	}
+}
+
+func TestParseConfigRejectsMissingRequiredKey(t *testing.T) {
+	bad := `[node]
+hostname = "node-1"
+role = "game-host"
+[performance]
+profile = "game"
+cpu_governor = "performance"
+tcp_congestion = "bbr"
+vm_swappiness = 1
+[shield]
+mode = "strict"
+allowed_ports = "22"
+`
+	if _, err := parseConfig(bad); err == nil {
+		t.Fatal("expected missing required key to fail")
+	}
+}
+
+func TestParseConfigRejectsMalformedQuotedString(t *testing.T) {
+	bad := strings.Replace(defaultConfig, `hostname = "raw-node-01"`, `hostname = "raw-node-01`, 1)
+	if _, err := parseConfig(bad); err == nil {
+		t.Fatal("expected malformed quoted string to fail")
+	}
+}
+
+func TestParseConfigRejectsInvalidHostname(t *testing.T) {
+	bad := strings.Replace(defaultConfig, `hostname = "raw-node-01"`, `hostname = "bad hostname"`, 1)
+	if _, err := parseConfig(bad); err == nil {
+		t.Fatal("expected invalid hostname to fail")
+	}
+}
+
+func TestParseConfigRejectsEmptyPortEntry(t *testing.T) {
+	bad := strings.Replace(defaultConfig, `allowed_ports = "22,25565,19132"`, `allowed_ports = "22,,19132"`, 1)
+	if _, err := parseConfig(bad); err == nil {
+		t.Fatal("expected empty port entry to fail")
+	}
+}
+
+func TestParseConfigRejectsDuplicateSection(t *testing.T) {
+	bad := defaultConfig + "\n[node]\nhostname = \"another-node\"\n"
+	if _, err := parseConfig(bad); err == nil {
+		t.Fatal("expected duplicate section to fail")
 	}
 }

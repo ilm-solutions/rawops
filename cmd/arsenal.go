@@ -77,6 +77,30 @@ func detectPkgManager() string {
 	return "unknown"
 }
 
+// moduleBinaries maps catalogue entries to executable names checked without host changes.
+var moduleBinaries = map[string][]string{
+	"net-ethtool": {"ethtool"}, "net-iperf3": {"iperf3"}, "net-mtr": {"mtr"}, "net-tcpdump": {"tcpdump"},
+	"net-wg": {"wg"}, "net-tc": {"tc"}, "net-haproxy": {"haproxy"}, "net-nginx": {"nginx"},
+	"net-bird2": {"bird"}, "net-frr": {"vtysh"}, "net-unbound": {"unbound", "unbound-control"}, "net-nmap": {"nmap"},
+	"sec-nft": {"nft"}, "sec-ipset": {"ipset"}, "sec-f2b": {"fail2ban-client"}, "sec-audit": {"auditctl"},
+	"sec-lynis": {"lynis"}, "sec-aide": {"aide"}, "sec-rkhunter": {"rkhunter"}, "sec-clamav": {"clamscan"},
+	"virt-kvm": {"qemu-system-x86_64"}, "virt-libvirt": {"virsh"}, "virt-docker": {"docker"}, "virt-podman": {"podman"},
+	"virt-lxc": {"lxc"}, "virt-cloudinit": {"cloud-init"}, "hw-cpupower": {"cpupower"}, "hw-numa": {"numactl"},
+	"hw-smart": {"smartctl"}, "hw-nvme": {"nvme"}, "hw-sensors": {"sensors"}, "hw-dmidecode": {"dmidecode"},
+	"stor-zfs": {"zfs"}, "stor-mdadm": {"mdadm"}, "stor-lvm2": {"lvs"}, "stor-borg": {"borg"},
+	"mon-btop": {"btop"}, "mon-sysstat": {"iostat"}, "mon-bpftrace": {"bpftrace"}, "mon-fio": {"fio"},
+	"mon-prom": {"prometheus-node-exporter", "node_exporter"}, "mon-chrony": {"chronyc"},
+}
+
+func findModuleBinary(id string, lookup func(string) (string, error)) (string, bool) {
+	for _, name := range moduleBinaries[id] {
+		if path, err := lookup(name); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 func resolvePackage(id string) (ToolModule, bool) {
 	for _, t := range ArsenalRegistry {
 		if t.ID == id {
@@ -86,13 +110,16 @@ func resolvePackage(id string) (ToolModule, bool) {
 	return ToolModule{}, false
 }
 
-var arsenalCmd = &cobra.Command{Use: "arsenal", Short: "Manage & deploy 42+ bare-metal hosting modules"}
+var arsenalCmd = &cobra.Command{Use: "arsenal", Short: "Inspect the 42-module hosting tool catalogue"}
 
 var arsenalListCmd = &cobra.Command{
 	Use: "list", Short: "List indexed modules (--cat=NET|SEC|VIRT|HW|STOR|MON)",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cat, _ := cmd.Flags().GetString("cat")
-		cat = strings.ToUpper(cat)
+		cat = strings.ToUpper(strings.TrimSpace(cat))
+		if cat != "" && cat != "NET" && cat != "SEC" && cat != "VIRT" && cat != "HW" && cat != "STOR" && cat != "MON" {
+			return fmt.Errorf("unknown category %q; use NET, SEC, VIRT, HW, STOR, or MON", cat)
+		}
 		PrintBanner()
 		fmt.Printf("[%sINF%s] Modules: %d | Bundles: %d | PkgMgr: %s\n\n", Cyan, Reset, len(ArsenalRegistry), len(BundlePresets), detectPkgManager())
 		for _, t := range ArsenalRegistry {
@@ -101,30 +128,60 @@ var arsenalListCmd = &cobra.Command{
 			}
 			fmt.Printf("%s%-14s%s %-5s %-24s %s\n", Bold, t.ID, Reset, t.Category, t.PackageName, t.Role)
 		}
+		return nil
+	},
+}
+
+var arsenalCheckCmd = &cobra.Command{
+	Use: "check [module-id]", Short: "Check catalogue tool availability (read-only)", Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		modules := ArsenalRegistry
+		if len(args) == 1 {
+			module, ok := resolvePackage(args[0])
+			if !ok {
+				return fmt.Errorf("unknown module %q; run 'rawops arsenal list'", args[0])
+			}
+			modules = []ToolModule{module}
+		}
+		PrintBanner()
+		available, missing := 0, 0
+		for _, module := range modules {
+			path, ok := findModuleBinary(module.ID, exec.LookPath)
+			if ok {
+				available++
+				fmt.Printf("[FOUND]   %-14s %-24s %s\n", module.ID, module.PackageName, path)
+			} else {
+				missing++
+				fmt.Printf("[MISSING] %-14s %-24s executable not found\n", module.ID, module.PackageName)
+			}
+		}
+		fmt.Printf("\nDetected: %d available | %d missing | %d checked\n", available, missing, len(modules))
+		fmt.Println("Read-only check: no packages were installed or changed.")
+		return nil
 	},
 }
 
 var arsenalBundleCmd = &cobra.Command{
-	Use: "bundle [preset]", Short: "Deploy hosting stack (game-host|vps-node|sec-core|net-edge|storage-pro)", Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Use: "bundle [preset]", Short: "Show modules in a hosting bundle (does not install packages)", Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
 		preset := strings.ToLower(args[0])
 		PrintBanner()
 		mods, ok := BundlePresets[preset]
 		if !ok {
-			fmt.Printf("[%sERR%s] Unknown bundle: %s\n", Red+Bold, Reset, preset)
-			return
+			return fmt.Errorf("unknown bundle %q; available bundles: game-host, vps-node, sec-core, net-edge, storage-pro", preset)
 		}
-		fmt.Printf("[%sBUNDLE%s] Stack [%s] (%d modules):\n\n", Cyan+Bold, Reset, strings.ToUpper(preset), len(mods))
+		fmt.Printf("[%sBUNDLE%s] Catalogue preview [%s] (%d modules; no packages installed):\n\n", Cyan+Bold, Reset, strings.ToUpper(preset), len(mods))
 		for i, id := range mods {
 			if t, found := resolvePackage(id); found {
 				fmt.Printf("[%02d/%02d] %-14s -> %s\n", i+1, len(mods), t.ID, t.PackageName)
 			}
 		}
+		return nil
 	},
 }
 
 func init() {
 	arsenalListCmd.Flags().String("cat", "", "Filter by category")
-	arsenalCmd.AddCommand(arsenalListCmd, arsenalBundleCmd)
+	arsenalCmd.AddCommand(arsenalListCmd, arsenalCheckCmd, arsenalBundleCmd)
 	rootCmd.AddCommand(arsenalCmd)
 }

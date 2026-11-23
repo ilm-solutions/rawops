@@ -20,21 +20,10 @@ var shieldCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		joined := strings.Join(ports, ", ")
-		table := fmt.Sprintf(`table inet rawops_shield {
-    chain input {
-        type filter hook input priority -10; policy accept;
-        ct state invalid drop
-        iifname "lo" accept
-        ct state established,related accept
-        tcp dport { %s } accept
-        udp dport { %s } accept
-    }
-}
-`, joined, joined)
+		table := renderShieldPolicy(ports)
 		if !apply {
 			path := "rawops-shield.nft"
-			if err := os.WriteFile(path, []byte(table), 0600); err != nil {
+			if err := atomicWrite(path, []byte(table), 0600); err != nil {
 				return err
 			}
 			fmt.Printf("Generated %s. No host changes were made.\n", path)
@@ -50,9 +39,9 @@ var shieldCmd = &cobra.Command{
 		// Check syntax using a temporary table name so an existing RAWOPS table
 		// cannot cause a false validation failure.
 		checkRules := strings.Replace(table, "rawops_shield", "rawops_shield_check", 1)
-		checkFile := "rawops-shield-check.nft"
-		if err := os.WriteFile(checkFile, []byte(checkRules), 0600); err != nil {
-			return err
+		checkFile, err := writeTempFile(os.TempDir(), "rawops-shield-check-*.nft", []byte(checkRules))
+		if err != nil {
+			return fmt.Errorf("prepare nftables validation file: %w", err)
 		}
 		defer os.Remove(checkFile)
 		out, err := runCommand(15*time.Second, "nft", "-c", "-f", checkFile)
@@ -60,17 +49,19 @@ var shieldCmd = &cobra.Command{
 			return fmt.Errorf("nftables validation failed: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 
-		// Snapshot before changing anything. Existing non-RAWOPS tables are untouched.
-		if err := CreateHostSnapshot(); err != nil {
+		// Snapshot returns the exact table-presence state it captured. Reuse it
+		// rather than re-reading inventory and introducing a snapshot/apply race.
+		hasShieldTable, err := CreateHostSnapshot()
+		if err != nil {
 			return fmt.Errorf("snapshot failed; refusing apply: %w", err)
 		}
-		batch := table
-		if _, listErr := runCommand(10*time.Second, "nft", "list", "table", "inet", "rawops_shield"); listErr == nil {
-			batch = "delete table inet rawops_shield\n" + table
+		batch := []byte(table)
+		if hasShieldTable {
+			batch = append([]byte("delete table inet rawops_shield\n"), batch...)
 		}
-		applyFile := "rawops-shield-apply.nft"
-		if err := os.WriteFile(applyFile, []byte(batch), 0600); err != nil {
-			return err
+		applyFile, err := writeTempFile(os.TempDir(), "rawops-shield-apply-*.nft", batch)
+		if err != nil {
+			return fmt.Errorf("prepare nftables apply file: %w", err)
 		}
 		defer os.Remove(applyFile)
 		out, err = runCommand(15*time.Second, "nft", "-c", "-f", applyFile)

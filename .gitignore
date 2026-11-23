@@ -1,3 +1,4 @@
-
-# Local build binaries
 /rawops
+/dist/
+/rawops-shield.nft
+/rawops-tune-*.conf

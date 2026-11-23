@@ -19,7 +19,7 @@ var doctorCmd = &cobra.Command{
 			detail string
 		}{
 			{"Linux host", runtime.GOOS == "linux", runtime.GOOS},
-			{"64-bit architecture", runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64", runtime.GOARCH},
+			{"target architecture (x86-64)", runtime.GOARCH == "amd64", runtime.GOARCH},
 			{"nftables binary", commandExists("nft"), commandPath("nft")},
 			{"sysctl binary", commandExists("sysctl"), commandPath("sysctl")},
 			{"root privileges", os.Geteuid() == 0, fmt.Sprintf("UID %d", os.Geteuid())},

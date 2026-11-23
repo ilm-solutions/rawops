@@ -23,7 +23,7 @@ var rootCmd = &cobra.Command{
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Report verified local host capabilities",
+	Short: "Show basic host facts and tool availability",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		PrintBanner()
 		fmt.Printf("OS/ARCH       : %s/%s\n", runtime.GOOS, runtime.GOARCH)

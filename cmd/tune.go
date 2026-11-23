@@ -39,7 +39,7 @@ var tuneCmd = &cobra.Command{
 			return fmt.Errorf("live tuning is intentionally disabled in this foundation; review generated policy and use a future transactional apply release")
 		}
 		path := "rawops-tune-" + profile + ".conf"
-		if err := os.WriteFile(path, []byte(cfg), 0600); err != nil {
+		if err := atomicWrite(path, []byte(cfg), 0600); err != nil {
 			return err
 		}
 		fmt.Printf("Generated %s. No kernel settings were changed.\n", path)

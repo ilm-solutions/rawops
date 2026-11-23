@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "release/**"
+      - "dev/**"
   pull_request:
     branches:
       - main
@@ -14,7 +15,7 @@ permissions:
 
 jobs:
   test:
-    name: Test and Build
+    name: Test, Vet, and Linux AMD64 Build
     runs-on: ubuntu-latest
 
     steps:
@@ -30,11 +31,17 @@ jobs:
       - name: Format Check
         run: test -z "$(gofmt -l .)"
 
-      - name: Run Tests
+      - name: Unit Tests with Race Detector
         run: go test -race ./...
 
       - name: Vet
         run: go vet ./...
 
-      - name: Build
-        run: go build -v ./...
+      - name: Build Linux AMD64 Release Binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o dist/rawops-linux-amd64 .
