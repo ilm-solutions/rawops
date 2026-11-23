@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,16 +16,10 @@ var shieldCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		portsRaw, _ := cmd.Flags().GetString("ports")
 		apply, _ := cmd.Flags().GetBool("apply")
-		ports := strings.Split(portsRaw, ",")
-		for i, p := range ports {
-			p = strings.TrimSpace(p)
-			n, err := strconv.Atoi(p)
-			if err != nil || n < 1 || n > 65535 {
-				return fmt.Errorf("invalid port %q", p)
-			}
-			ports[i] = strconv.Itoa(n)
+		ports, err := parseShieldPorts(portsRaw)
+		if err != nil {
+			return err
 		}
-		ports = uniqueStrings(ports)
 		joined := strings.Join(ports, ", ")
 		table := fmt.Sprintf(`table inet rawops_shield {
     chain input {
@@ -91,18 +84,6 @@ var shieldCmd = &cobra.Command{
 		fmt.Println("RAWOPS-owned nftables table applied. Existing non-RAWOPS tables were not flushed.")
 		return nil
 	},
-}
-
-func uniqueStrings(in []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func init() {
