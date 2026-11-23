@@ -87,7 +87,7 @@ Short: "Provision and install a single module onto the host system",
 Args:  cobra.ExactArgs(1),
 Run: func(cmd *cobra.Command, args []string) {
 execLive, _ := cmd.Flags().GetBool("exec")
-target := strings.ToLower(args)
+target := strings.ToLower(args[0])
 PrintBanner()
 pkgMgr := detectPkgManager()
 
@@ -120,7 +120,7 @@ Use:   "bundle [game-host|vps-node|sec-core]",
 Short: "Deploy a complete hosting preset stack in one command",
 Args:  cobra.ExactArgs(1),
 Run: func(cmd *cobra.Command, args []string) {
-preset := strings.ToLower(args)
+preset := strings.ToLower(args[0])
 PrintBanner()
 modules, exists := BundlePresets[preset]
 if !exists {
