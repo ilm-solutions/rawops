@@ -29,14 +29,14 @@ return 0, 0, 0
 }
 var memTotal, memAvail uint64
 for _, line := range strings.Split(string(data), "\n") {
-fields := strings.Fields(line)
-if len(fields) < 2 {
+f := strings.Fields(line)
+if len(f) < 2 {
 continue
 }
-val, _ := strconv.ParseUint(fields, 10, 64)
-if fields == "MemTotal:" {
+val, _ := strconv.ParseUint(f[1], 10, 64)
+if f[0] == "MemTotal:" {
 memTotal = val / 1024
-} else if fields == "MemAvailable:" {
+} else if f[0] == "MemAvailable:" {
 memAvail = val / 1024
 }
 }
@@ -56,11 +56,14 @@ for _, line := range strings.Split(string(data), "\n") {
 if !strings.Contains(line, ":") || strings.Contains(line, "lo:") {
 continue
 }
-parts := strings.Split(line, ":")
-fields := strings.Fields(parts)
-if len(fields) >= 10 {
-rx, _ := strconv.ParseUint(fields, 10, 64)
-tx, _ := strconv.ParseUint(fields, 10, 64)
+p := strings.Split(line, ":")
+if len(p) < 2 {
+continue
+}
+f := strings.Fields(p[1])
+if len(f) >= 10 {
+rx, _ := strconv.ParseUint(f[1], 10, 64)
+tx, _ := strconv.ParseUint(f[9], 10, 64)
 rxPkts += rx
 txPkts += tx
 }
