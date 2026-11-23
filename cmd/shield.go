@@ -1,83 +1,112 @@
 package cmd
 
 import (
-"fmt"
-"os"
-"os/exec"
-"strings"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
 
-"github.com/spf13/cobra"
+	"github.com/spf13/cobra"
 )
 
 var shieldCmd = &cobra.Command{
-Use:   "shield",
-Short: "Deploy live nftables zero-trust firewall and L3/L4 DDoS armor",
-Run: func(cmd *cobra.Command, args []string) {
-mode, _ := cmd.Flags().GetString("mode")
-ports, _ := cmd.Flags().GetString("ports")
-apply, _ := cmd.Flags().GetBool("apply")
-
-PrintBanner()
-fmt.Printf("[%sSEC%s] Shield Posture           : %s%s%s\n", Cyan, Reset, Bold, strings.ToUpper(mode), Reset)
-fmt.Printf("[%sSEC%s] Whitelisted TCP/UDP Ports: %s\n", Cyan, Reset, ports)
-fmt.Printf("[%sSYS%s] Kernel TCP SYN Cookies   : %s\n\n", Cyan, Reset, readKernelParam("/proc/sys/net/ipv4/tcp_syncookies"))
-
-RunTask("Compiling zero-trust nftables anti-DDoS ruleset...", 700)
-nftRules := fmt.Sprintf(`#!/usr/sbin/nft -f
-flush ruleset
-
-table inet rawops_shield {
-    chain ingress_filter {
-        type filter hook input priority -100; policy drop;
-
-        iif "lo" accept
-        ct state established,related accept
-
-        # Drop malformed & invalid packets at wire speed
+	Use:   "shield",
+	Short: "Generate or safely validate RAWOPS-owned nftables policy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		portsRaw, _ := cmd.Flags().GetString("ports")
+		apply, _ := cmd.Flags().GetBool("apply")
+		ports := strings.Split(portsRaw, ",")
+		for i, p := range ports {
+			p = strings.TrimSpace(p)
+			n, err := strconv.Atoi(p)
+			if err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("invalid port %q", p)
+			}
+			ports[i] = strconv.Itoa(n)
+		}
+		ports = uniqueStrings(ports)
+		joined := strings.Join(ports, ", ")
+		table := fmt.Sprintf(`table inet rawops_shield {
+    chain input {
+        type filter hook input priority -10; policy accept;
         ct state invalid drop
-        tcp flags & (fin|syn|rst|psh|ack|urg) == 0 drop
-        tcp flags & (fin|syn) == (fin|syn) drop
-
-        # SYN-Flood & ICMP Rate Limiting
-        tcp flags syn limit rate 50/second burst 100 packets accept
-        ip protocol icmp limit rate 5/second accept
-
-        # Whitelisted Hosting Ports
+        iifname "lo" accept
+        ct state established,related accept
         tcp dport { %s } accept
         udp dport { %s } accept
     }
 }
-`, ports, ports)
+`, joined, joined)
+		if !apply {
+			path := "rawops-shield.nft"
+			if err := os.WriteFile(path, []byte(table), 0600); err != nil {
+				return err
+			}
+			fmt.Printf("Generated %s. No host changes were made.\n", path)
+			return nil
+		}
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("--apply requires root")
+		}
+		if _, err := exec.LookPath("nft"); err != nil {
+			return fmt.Errorf("nftables is not installed")
+		}
 
-if !apply {
-outFile := "rawops-shield.nft"
-_ = os.WriteFile(outFile, []byte(nftRules), 0644)
-fmt.Printf("[%sDRY-RUN%s] Ruleset saved: %s (Use --apply as root to enforce live)\n", Yellow+Bold, Reset, outFile)
-return
+		// Check syntax using a temporary table name so an existing RAWOPS table
+		// cannot cause a false validation failure.
+		checkRules := strings.Replace(table, "rawops_shield", "rawops_shield_check", 1)
+		checkFile := "rawops-shield-check.nft"
+		if err := os.WriteFile(checkFile, []byte(checkRules), 0600); err != nil {
+			return err
+		}
+		defer os.Remove(checkFile)
+		out, err := runCommand(15*time.Second, "nft", "-c", "-f", checkFile)
+		if err != nil {
+			return fmt.Errorf("nftables validation failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+
+		// Snapshot before changing anything. Existing non-RAWOPS tables are untouched.
+		if err := CreateHostSnapshot(); err != nil {
+			return fmt.Errorf("snapshot failed; refusing apply: %w", err)
+		}
+		batch := table
+		if _, listErr := runCommand(10*time.Second, "nft", "list", "table", "inet", "rawops_shield"); listErr == nil {
+			batch = "delete table inet rawops_shield\n" + table
+		}
+		applyFile := "rawops-shield-apply.nft"
+		if err := os.WriteFile(applyFile, []byte(batch), 0600); err != nil {
+			return err
+		}
+		defer os.Remove(applyFile)
+		out, err = runCommand(15*time.Second, "nft", "-c", "-f", applyFile)
+		if err != nil {
+			return fmt.Errorf("transaction preflight failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		out, err = runCommand(15*time.Second, "nft", "-f", applyFile)
+		if err != nil {
+			return fmt.Errorf("atomic nftables transaction failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		fmt.Println("RAWOPS-owned nftables table applied. Existing non-RAWOPS tables were not flushed.")
+		return nil
+	},
 }
 
-if os.Geteuid() != 0 {
-fmt.Printf("[%sERR%s] Root privileges (UID 0) required to enforce live nftables.\n", Red+Bold, Reset)
-return
-}
-
-RunTask("Snapshotting existing firewall state...", 500)
-_ = CreateHostSnapshot()
-_ = os.MkdirAll("/etc/rawops", 0700)
-
-nftPath := "/etc/rawops/shield.nft"
-_ = os.WriteFile(nftPath, []byte(nftRules), 0600)
-RunTask("Loading live nftables ruleset & SYN-cookies...", 800)
-_ = exec.Command("sysctl", "-w", "net.ipv4.tcp_syncookies=1").Run()
-_ = exec.Command("nft", "-f", nftPath).Run()
-
-fmt.Printf("\n[%sARMED%s] Zero-Trust nftables DDoS shield active on host.\n", Green+Bold, Reset)
-},
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func init() {
-shieldCmd.Flags().String("mode", "strict", "Security posture (strict | lockdown)")
-shieldCmd.Flags().String("ports", "22,25565", "Comma-separated allowed ports")
-shieldCmd.Flags().Bool("apply", false, "Enforce rules directly in Linux kernel (requires root)")
-rootCmd.AddCommand(shieldCmd)
+	shieldCmd.Flags().String("ports", "22,25565", "Comma-separated TCP/UDP ports")
+	shieldCmd.Flags().Bool("apply", false, "Apply RAWOPS-owned nftables table (requires root)")
+	rootCmd.AddCommand(shieldCmd)
 }

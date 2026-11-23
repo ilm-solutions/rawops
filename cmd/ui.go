@@ -29,4 +29,3 @@ func RunTask(label string, durationMs int) {
 	}
 	fmt.Printf("\r[%s*%s] %-36s [%s OK %s]\n", Green, Reset, label, Green+Bold, Reset)
 }
-
